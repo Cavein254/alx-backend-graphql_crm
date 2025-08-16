@@ -1,6 +1,8 @@
 import graphene
 from graphene_django import DjangoObjectType
+from graphene_django.filter import DjangoFilterConnectionField
 from .models import Customer, Product, Order
+from .filters import CustomerFilter, ProductFilter, OrderFilter
 from django.core.exceptions import ValidationError
 from django.db import transaction
 import re
@@ -15,19 +17,25 @@ from decimal import Decimal, InvalidOperation
 class CustomerType(DjangoObjectType):
     class Meta:
         model = Customer
-        fields = ("id", "name", "email", "phone")
+        # fields = ("id", "name", "email", "phone")
+        interfaces = (graphene.relay.Node,)
+        filterset_class = CustomerFilter
 
 
 class ProductType(DjangoObjectType):
     class Meta:
         model = Product
         fields = ("id", "name", "price", "stock")
+        interfaces = (graphene.relay.Node,)
+        filterset_class = ProductFilter
 
 
 class OrderType(DjangoObjectType):
     class Meta:
         model = Order
         fields = ("id", "customer", "products", "total_amount", "order_date")
+        interfaces = (graphene.relay.Node,)
+        filterset_class = OrderFilter
 
 # =====================
 # Input Types
@@ -190,19 +198,70 @@ class CreateOrder(graphene.Mutation):
 # =====================
 class Query(graphene.ObjectType):
     hello = graphene.String(default_value="Hello, GraphQL!")
-    customers = graphene.List(CustomerType)
-    products = graphene.List(ProductType)
-    orders = graphene.List(OrderType)
+    all_customers = DjangoFilterConnectionField(CustomerType)
+    all_products = DjangoFilterConnectionField(ProductType)
+    all_orders = DjangoFilterConnectionField(OrderType)
+    # -------------------- Customers --------------------
+    customers = graphene.List(
+        CustomerType,
+        name=graphene.String(),
+        email=graphene.String()
+    )
+    
+    # -------------------- Products --------------------
+    products = graphene.List(
+        ProductType,
+        name=graphene.String(),
+        price_gte=graphene.Float(),
+        price_lte=graphene.Float(),
+        stock_gte=graphene.Int(),
+        stock_lte=graphene.Int()
+    )
 
-    def resolve_customers(self, info):
-        return Customer.objects.all()
+    # -------------------- Orders --------------------
+    orders = graphene.List(
+        OrderType,
+        total_amount_gte=graphene.Float(),
+        total_amount_lte=graphene.Float(),
+        customer_name=graphene.String(),
+        product_name=graphene.String()
+    )
 
-    def resolve_products(self, info):
-        return Product.objects.all()
 
-    def resolve_orders(self, info):
-        return Order.objects.all()
+    def resolve_customers(self, info, name=None, email=None):
+        qs = Customer.objects.all()
+        if name:
+            qs = qs.filter(name__icontains=name)
+        if email:
+            qs = qs.filter(email__icontains=email)
+        return qs
 
+
+    def resolve_products(self, info, name=None, price_gte=None, price_lte=None, stock_gte=None, stock_lte=None):
+        qs = Product.objects.all()
+        if name:
+            qs = qs.filter(name__icontains=name)
+        if price_gte is not None:
+            qs = qs.filter(price__gte=price_gte)
+        if price_lte is not None:
+            qs = qs.filter(price__lte=price_lte)
+        if stock_gte is not None:
+            qs = qs.filter(stock__gte=stock_gte)
+        if stock_lte is not None:
+            qs = qs.filter(stock__lte=stock_lte)
+        return qs
+
+    def resolve_orders(self, info, total_amount_gte=None, total_amount_lte=None, customer_name=None, product_name=None):
+        qs = Order.objects.select_related("customer").prefetch_related("products").all()
+        if total_amount_gte is not None:
+            qs = qs.filter(total_amount__gte=total_amount_gte)
+        if total_amount_lte is not None:
+            qs = qs.filter(total_amount__lte=total_amount_lte)
+        if customer_name:
+            qs = qs.filter(customer__name__icontains=customer_name)
+        if product_name:
+            qs = qs.filter(product__name__icontains=product_name)
+        return qs
 
 class Mutation(graphene.ObjectType):
     create_customer = CreateCustomer.Field()
