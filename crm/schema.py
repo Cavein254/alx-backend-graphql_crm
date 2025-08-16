@@ -5,6 +5,7 @@ from django.core.exceptions import ValidationError
 from django.db import transaction
 import re
 from datetime import datetime
+from decimal import Decimal, InvalidOperation
 
 
 
@@ -60,14 +61,18 @@ class CreateCustomer(graphene.Mutation):
     errors = graphene.List(graphene.String)
 
     def mutate(self, info,input):
+        errors = []
         # Email uniqueness
         if Customer.objects.filter(email=input.email).exists():
-            raise Exception("Email already exists")
+            errors.append(f"Email already exists: {input.email}")
 
         # Phone validation
         if input.phone:
             if not re.match(r"^\+?\d{1,3}[- ]?\d{3,}[- ]?\d{3,}$", input.phone):
-                raise Exception("Invalid phone format. Use +1234567890 or 123-456-7890")
+                errors.append(f"Invalid phone format: {input.phone}")
+
+        if errors:
+            return CreateCustomer(customer=None, message="Failed to create customer", errors=errors)
 
         customer = Customer(
             name=input.name, 
@@ -85,11 +90,11 @@ class BulkCreateCustomers(graphene.Mutation):
     errors = graphene.List(graphene.String)
 
     @transaction.atomic
-    def mutate(self, info, customers):
+    def mutate(self, info, input):
         created_customers = []
         errors = []
 
-        for data in customers:
+        for data in input:
             try:
                 # Notice: now we access fields as attributes (not dict keys)
                 if Customer.objects.filter(email=data.email).exists():
@@ -118,12 +123,21 @@ class CreateProduct(graphene.Mutation):
     errors = graphene.List(graphene.String)
 
     def mutate(self, info, input):
-        if input.price <= 0:
-            raise Exception("Price must be positive")
-        if input.stock < 0:
-            raise Exception("Stock cannot be negative")
+        errors = []
+        # Safely convert float to Decimal
+        try:
+            price_decimal = Decimal(str(input.price))
+        except (InvalidOperation, ValueError):
+            errors.append("Invalid price format. Must be a valid number.")
 
-        product = Product(name=input.name, price=input.price, stock=input.stock)
+        if input.price <= 0:
+            errors.append("Price must be positive.")
+        if input.stock < 0:
+            errors.append("Stock cannot be negative.")
+        if errors:
+            return CreateProduct(product=None, errors=errors)
+
+        product = Product(name=input.name, price=price_decimal, stock=input.stock)
         product.save()
         return CreateProduct(product=product, errors=None)
 
@@ -157,13 +171,17 @@ class CreateOrder(graphene.Mutation):
 
         if errors:
             return CreateOrder(order=None, errors=errors)
+        total_amount = sum(p.price for p in products)
         
         order = Order(
             customer=customer, 
-            order_date=input.order_date or datetime.now()
-            total_amount=total_amount)
+            order_date=input.order_date or datetime.now())
+        order.save()
         
         order.products.set(products)
+        total = sum([p.price for p in products], Decimal("0.00"))
+        order.total_amount = total
+        order.save()
 
         return CreateOrder(order=order, errors=None)
 
