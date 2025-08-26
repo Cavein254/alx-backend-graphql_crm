@@ -7,7 +7,7 @@
 
 ## Installation
 ```bash
-# Install dependencies
+# Install Redis and dependencies.
 pip install -r requirements.txt
 
 # Run migrations
