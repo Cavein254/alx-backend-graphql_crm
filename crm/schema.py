@@ -192,6 +192,7 @@ class CreateOrder(graphene.Mutation):
         order.save()
 
         return CreateOrder(order=order, errors=None)
+    
 class UpdateLowStockProducts(graphene.Mutation):
     class Arguments:
         # no input args, just restock all low-stock products
@@ -291,4 +292,5 @@ class Mutation(graphene.ObjectType):
     bulk_create_customers = BulkCreateCustomers.Field()
     create_product = CreateProduct.Field()
     create_order = CreateOrder.Field()
+    update_low_stock_products = UpdateLowStockProducts.Field()
 
